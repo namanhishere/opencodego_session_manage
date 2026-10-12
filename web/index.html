@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpenCode Go Session Proxy</title>
+<style>
+:root{--bg:#0f1115;--panel:#181b22;--line:#272b35;--fg:#e6e8ee;--mut:#8b91a1;--acc:#5b8cff;--ok:#3ecf8e;--err:#ff6b6b;--warn:#f5b84b;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--grid:#2c303b}
+@media(prefers-color-scheme:light){:root{--bg:#f5f6f8;--panel:#fff;--line:#dfe2e8;--fg:#1b1e25;--mut:#6a7080;--acc:#2f63e0;--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--grid:#e6e8ec}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif}
+header{display:flex;align-items:center;gap:20px;padding:10px 20px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+header b{font-size:15px}nav{display:flex;gap:4px;flex:1;flex-wrap:wrap}
+nav a{padding:6px 12px;border-radius:6px;color:var(--mut);cursor:pointer;text-decoration:none}
+nav a.on{background:var(--acc);color:#fff}main{padding:20px;max-width:1300px;margin:auto}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px}
+.stat .v{font-size:22px;font-weight:600}.stat .l{color:var(--mut);font-size:12px}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--mut);font-weight:500;font-size:12px}td.w{white-space:normal;word-break:break-all}
+tr.click{cursor:pointer}tr.click:hover{background:rgba(127,127,127,.1)}
+.scroll{overflow-x:auto}
+input,select,button,textarea{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 10px}
+button{cursor:pointer;background:var(--acc);border-color:var(--acc);color:#fff}button.sec{background:transparent;color:var(--fg);border-color:var(--line)}
+button.bad{background:var(--err);border-color:var(--err)}button.sm{padding:2px 8px;font-size:12px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;background:rgba(127,127,127,.18)}
+.ok{color:var(--ok)}.err{color:var(--err)}.warn{color:var(--warn)}.mut{color:var(--mut)}
+pre{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;overflow:auto;max-height:420px;white-space:pre-wrap;word-break:break-all;margin:6px 0}
+h2{margin:0 0 12px;font-size:16px}h3{margin:14px 0 6px;font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:16px;margin-bottom:16px}.charts .card{margin:0}
+.chart{width:100%;height:auto;display:block}.chart text{fill:var(--mut);font-size:13px}.chart .gl{stroke:var(--grid);stroke-width:1}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mut);margin:0 0 6px}.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.hb{display:grid;grid-template-columns:minmax(80px,170px) 1fr auto;gap:4px 10px;align-items:center;font-size:13px}.hb .lb{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hb .tr{height:10px;background:rgba(127,127,127,.15);border-radius:0 4px 4px 0;overflow:hidden}.hb .tr b{display:block;height:100%;border-radius:0 4px 4px 0}
+#tip{position:fixed;z-index:30;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font-size:12px;white-space:pre;box-shadow:0 4px 14px rgba(0,0,0,.3);display:none}
+.wf{position:relative;margin:6px 0}.wf .r{display:grid;grid-template-columns:130px 1fr 120px;align-items:center;gap:8px;height:24px;font-size:12px}
+.wf .r .lbl{color:var(--mut);text-align:right}.wf .lane{position:relative;height:14px;background:rgba(127,127,127,.08);border-radius:3px}
+.wf .lane i{position:absolute;top:0;bottom:0;border-radius:3px;min-width:2px;border:0}.wf .ax{display:grid;grid-template-columns:130px 1fr 120px;gap:8px;font-size:11px;color:var(--mut)}
+.wf .ax div.t{display:flex;justify-content:space-between}
+.wf .fin{position:absolute;top:0;bottom:0;width:0;border-left:2px dashed var(--mut);opacity:.6}
+button.spin::before{content:"";display:inline-block;width:10px;height:10px;margin-right:6px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-1px}@keyframes sp{to{transform:rotate(360deg)}}
+.fr{font-size:12px}.fr.stop{color:var(--ok)}.fr.length,.fr.incomplete{color:var(--warn)}.fr.tool_calls{color:var(--s1)}.fr.bad{color:var(--err)}
+@media(max-width:560px){.charts{grid-template-columns:1fr}.wf .r,.wf .ax{grid-template-columns:70px 1fr 56px}}
+#login{max-width:320px;margin:15vh auto}#login input{width:100%;margin-bottom:10px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;padding:5vh 16px;overflow:auto;z-index:10}
+.modal>div{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;width:min(1000px,100%)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = n => Number(n || 0).toLocaleString();
+const ago = t => { if (!t) return '—'; const s = Math.floor(Date.now() / 1000 - t); if (s < 0) { const f = -s; return 'in ' + (f < 3600 ? Math.round(f / 60) + 'm' : (f / 3600).toFixed(1) + 'h'); }
+  return s < 60 ? s + 's ago' : s < 3600 ? Math.floor(s / 60) + 'm ago' : s < 86400 ? Math.floor(s / 3600) + 'h ago' : Math.floor(s / 86400) + 'd ago'; };
+const dt = t => t ? new Date(t * 1000).toLocaleString() : '—';
+const short = id => id.length > 26 ? id.slice(0, 14) + '…' + id.slice(-8) : id;
+
+async function api(path, method = 'GET', body) {
+  const r = await fetch('/admin/api/' + path, { method, headers: { 'Content-Type': 'application/json', 'X-Admin': '1' }, body: body ? JSON.stringify(body) : undefined });
+  if (r.status === 401 && path !== 'login') { showLogin(); throw new Error('unauthorized'); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const toast = m => alert(m);
+
+let page = 'overview', timer;
+const pages = { overview, sessions, requests, upstream, clients, settings };
+
+function showLogin() {
+  clearInterval(timer); document.onkeydown = null;
+  $('#app').innerHTML = `<div id="login" class="card"><h2>OpenCode Go Session Proxy</h2>
+    <input id="pw" type="password" placeholder="Admin password" autofocus><button id="go" style="width:100%">Sign in</button><div id="le" class="err"></div></div>`;
+  const go = async () => { try { await api('login', 'POST', { password: $('#pw').value }); boot(); } catch (e) { $('#le').textContent = e.message; } };
+  $('#go').onclick = go; $('#pw').onkeydown = e => e.key === 'Enter' && go();
+}
+
+const AUTO_KEY = 'ocs_auto';
+let auto = (() => { try { return +(localStorage.getItem(AUTO_KEY) ?? 15); } catch { return 15; } })();
+const autoPages = ['overview', 'sessions', 'requests'];
+
+async function boot() {
+  try { await api('me'); } catch { return; }
+  $('#app').innerHTML = `<header><b>OpenCode Go Proxy</b><nav>${Object.keys(pages).map(p => `<a data-p="${p}">${p[0].toUpperCase() + p.slice(1)}</a>`).join('')}</nav>
+    <span class="mut" id="upd" style="font-size:12px"></span>
+    <select id="auto" title="Auto-refresh (overview, sessions, requests)">${[[0, 'auto: off'], [5, 'auto: 5s'], [15, 'auto: 15s'], [30, 'auto: 30s'], [60, 'auto: 60s']].map(([v, l]) => `<option value="${v}" ${v === auto ? 'selected' : ''}>${l}</option>`).join('')}</select>
+    <button class="sec sm" id="rl" title="Reload current view (r)">↻ Reload</button>
+    <button class="sec sm" id="lo">Sign out</button></header><main id="main"></main>`;
+  document.querySelectorAll('nav a').forEach(a => a.onclick = () => go(a.dataset.p));
+  $('#lo').onclick = async () => { await api('logout', 'POST'); showLogin(); };
+  $('#rl').onclick = () => reload();
+  $('#auto').onchange = e => { auto = +e.target.value; try { localStorage.setItem(AUTO_KEY, auto); } catch {} schedule(); };
+  document.onkeydown = e => { if (e.key === 'r' && !e.metaKey && !e.ctrlKey && !/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) reload(); };
+  go(location.hash.slice(1) in pages ? location.hash.slice(1) : 'overview');
+}
+
+let curArg, running = false;
+async function run() {
+  const btn = $('#rl'); if (running || !btn) return; running = true; btn.classList.add('spin');
+  try { await pages[page]($('#main'), curArg); const u = $('#upd'); if (u) u.textContent = 'updated ' + new Date().toLocaleTimeString(); }
+  catch (e) { if (e.message !== 'unauthorized') $('#main').innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
+  finally { running = false; btn.classList.remove('spin'); }
+}
+const reload = () => { curArg = undefined; return run(); };
+function schedule() {
+  clearInterval(timer);
+  if (auto && autoPages.includes(page)) timer = setInterval(() => {
+    // don't clobber a half-typed filter or an open detail view
+    if (document.querySelector('.modal') || /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+    reload();
+  }, auto * 1000);
+}
+
+function go(p, arg) {
+  page = p; location.hash = p; curArg = arg;
+  document.querySelectorAll('nav a').forEach(a => a.classList.toggle('on', a.dataset.p === p));
+  run(); schedule();
+}
+
+const tip = Object.assign(document.createElement('div'), { id: 'tip' });
+document.body.appendChild(tip);
+document.addEventListener('mousemove', e => {
+  const t = e.target.closest && e.target.closest('[data-tip]');
+  if (!t) { tip.style.display = 'none'; return; }
+  tip.textContent = t.dataset.tip; tip.style.display = 'block';
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  tip.style.left = Math.max(4, Math.min(e.clientX + 14, innerWidth - w - 4)) + 'px';
+  tip.style.top = Math.max(4, Math.min(e.clientY + 14, innerHeight - h - 4)) + 'px';
+});
+
+function table(cols, rows, opts = {}) {
+  return `<div class="scroll"><table><thead><tr>${cols.map(c => `<th>${c[0]}</th>`).join('')}</tr></thead><tbody>${
+    rows.map((r, i) => `<tr class="${opts.click ? 'click' : ''}" data-i="${i}">${cols.map(c => `<td class="${c[2] || ''}">${c[1](r)}</td>`).join('')}</tr>`).join('') ||
+    `<tr><td colspan="${cols.length}" class="mut">Nothing yet</td></tr>`}</tbody></table></div>`;
+}
+
+const niceMax = v => { if (v <= 0) return 1; const p = 10 ** Math.floor(Math.log10(v)), n = v / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p; };
+const compact = n => n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k' : String(Math.round(n));
+const msf = n => n >= 10000 ? (n / 1000).toFixed(0) + 's' : n >= 1000 ? (n / 1000).toFixed(1) + 's' : Math.round(n) + 'ms';
+const legend = layers => `<div class="legend">${layers.map(l => `<span><i style="background:${l.color}"></i>${esc(l.label)}</span>`).join('')}</div>`;
+
+// buckets without traffic are filled in so the time axis is even
+function fillSeries(series, hours, bucket) {
+  const by = new Map(series.map(s => [s.t, s])), now = Date.now() / 1000, out = [];
+  for (let t = Math.floor((now - hours * 3600) / bucket) * bucket; t <= now; t += bucket)
+    out.push(by.get(t) || { t, requests: 0, prompt_tokens: 0, completion_tokens: 0, cached_tokens: 0, errors: 0, avg_latency_ms: null, avg_ttfb_ms: null });
+  return out;
+}
+
+// stacked bars (type 'bar') or lines (type 'line') over a time axis, with a hover column per bucket
+function chart(series, bucket, layers, o = {}) {
+  const W = 900, H = o.h || 160, L = 40, R = 6, T = 8, B = 18, pw = W - L - R, ph = H - T - B, n = series.length;
+  if (!n) return '<span class="mut">No data</span>';
+  const f = o.fmt || compact, line = o.type === 'line';
+  const tot = series.map(s => layers.reduce((a, l) => a + (l.v(s) || 0), 0));
+  const max = niceMax(Math.max(0, ...(line ? series.flatMap(s => layers.map(l => l.v(s) || 0)) : tot)));
+  const y = v => T + ph - ph * v / max, slot = pw / n, cx = i => L + slot * (i + .5);
+  const tl = t => { const d = new Date(t * 1000); return bucket >= 86400 ? d.toLocaleDateString([], { month: 'short', day: 'numeric' }) : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); };
+  let g = [0, .5, 1].map(k => `<line class="gl" x1="${L}" x2="${W - R}" y1="${y(max * k)}" y2="${y(max * k)}"/><text x="${L - 5}" y="${y(max * k) + 3}" text-anchor="end">${f(max * k)}</text>`).join('');
+  if (line) {
+    g += layers.map(l => {
+      let d = '', pen = false; series.forEach((s, i) => { const v = l.v(s); if (v == null) { pen = false; return; } d += (pen ? 'L' : 'M') + cx(i).toFixed(1) + ' ' + y(v).toFixed(1); pen = true; });
+      const dots = n <= 48 ? series.map((s, i) => l.v(s) == null ? '' : `<circle cx="${cx(i)}" cy="${y(l.v(s))}" r="3" fill="${l.color}" stroke="var(--panel)" stroke-width="2"/>`).join('') : '';
+      return `<path d="${d}" fill="none" stroke="${l.color}" stroke-width="2" stroke-linejoin="round"/>${dots}`;
+    }).join('');
+  } else {
+    g += series.map((s, i) => { let acc = 0; return layers.map(l => { const v = l.v(s) || 0; if (!v) return ''; const y1 = y(acc + v), h = y(acc) - y1; acc += v;
+      return `<rect x="${L + slot * i + 1}" y="${y1}" width="${Math.max(1, slot - 2)}" height="${Math.max(h, 1)}" fill="${l.color}" stroke="var(--panel)" stroke-width="1" rx="${slot > 6 ? 2 : 0}"/>`; }).join(''); }).join('');
+  }
+  const hit = series.map((s, i) => `<rect x="${L + slot * i}" y="${T}" width="${slot}" height="${ph}" fill="transparent" data-tip="${esc(tl(s.t) + '\n' + layers.map(l => l.label + ': ' + (l.v(s) == null ? '—' : (o.tipFmt || f)(l.v(s)))).join('\n'))}"/>`).join('');
+  const xl = [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i).map((i, k, a) => `<text x="${cx(i)}" y="${H - 4}" text-anchor="${k === 0 ? 'start' : k === a.length - 1 ? 'end' : 'middle'}">${esc(tl(series[i].t))}</text>`).join('');
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.label || '')}">${g}${xl}${hit}</svg>`;
+}
+
+// horizontal bars: rows = [{label, value, color, text}]
+function hbars(rows) {
+  const max = Math.max(1, ...rows.map(r => r.value));
+  return `<div class="hb">${rows.map(r => `<span class="lb" title="${esc(r.label)}">${esc(r.label)}</span><span class="tr" data-tip="${esc(r.label + ': ' + (r.text ?? fmt(r.value)))}"><b style="width:${Math.max(1, 100 * r.value / max)}%;background:${r.color}"></b></span><span class="mut">${esc(r.text ?? fmt(r.value))}</span>`).join('') || '<span class="mut">No data</span>'}</div>`;
+}
+
+const finishColor = r => /^(stop)$/.test(r) ? 'var(--s3)' : r === 'tool_calls' ? 'var(--s1)' : /^(length|incomplete)/.test(r) ? 'var(--s4)' : /(error|aborted|content_filter)/.test(r) ? 'var(--err)' : 'var(--mut)';
+
+async function overview(el) {
+  const hours = +(el.dataset.h || 24), cl = el.dataset.c || '', up = el.dataset.u || '';
+  const d = await api(`overview?hours=${hours}&client=${cl}&upstream=${up}`), t = d.totals, pc = d.percentiles || {};
+  const hit = t.prompt_tokens ? (100 * t.cached_tokens / t.prompt_tokens).toFixed(1) + '%' : '—';
+  const series = fillSeries(d.series || [], hours, d.bucket);
+  const opts = (rows, sel) => `<option value="">all</option>` + rows.map(r => `<option value="${r.id}" ${String(r.id) === sel ? 'selected' : ''}>${esc(r.name)}</option>`).join('');
+  const tokLayers = [{ label: 'cached prompt', color: 'var(--s3)', v: s => s.cached_tokens }, { label: 'uncached prompt', color: 'var(--s1)', v: s => Math.max(0, s.prompt_tokens - s.cached_tokens) }, { label: 'completion', color: 'var(--s2)', v: s => s.completion_tokens }];
+  const reqLayers = [{ label: 'ok', color: 'var(--s1)', v: s => s.requests - s.errors }, { label: 'errors', color: 'var(--err)', v: s => s.errors }];
+  const latLayers = [{ label: 'avg total latency', color: 'var(--s1)', v: s => s.avg_latency_ms }, { label: 'avg time to first byte (streams)', color: 'var(--s2)', v: s => s.avg_ttfb_ms }];
+  const hitLayers = [{ label: 'cache hit %', color: 'var(--s3)', v: s => s.prompt_tokens ? 100 * s.cached_tokens / s.prompt_tokens : null }];
+  const keyRow = (kind, rows) => table([[kind, r => esc(r.name)], ['Requests', r => fmt(r.requests)], ['Prompt', r => fmt(r.prompt_tokens)], ['Cached', r => fmt(r.cached_tokens)], ['Completion', r => fmt(r.completion_tokens)], ['Errors', r => `<span class="${r.errors ? 'err' : ''}">${fmt(r.errors)}</span>`]], rows, { click: true });
+  const filt = (cl ? ` · client #${cl}` : '') + (up ? ` · upstream #${up}` : '');
+  el.dataset.h = hours;
+  el.innerHTML = `<div class="row"><h2 style="margin:0">Overview</h2>
+    <select id="hrs" title="Time range">${[1, 6, 24, 72, 168, 720].map(h => `<option value="${h}" ${h === hours ? 'selected' : ''}>last ${h}h</option>`).join('')}</select>
+    <select id="fc" title="Client key">${opts(d.filters.client, cl).replace('all', 'all client keys')}</select>
+    <select id="fu" title="Upstream key">${opts(d.filters.upstream, up).replace('all', 'all upstream keys')}</select>
+    ${cl || up ? '<button class="sec sm" id="clr">Clear filters</button>' : ''}<span class="mut">${esc(filt)}</span></div>
+  <div class="grid">
+    <div class="stat"><div class="v">${fmt(t.requests)}</div><div class="l">requests (${fmt(t.streams)} streamed)</div></div>
+    <div class="stat"><div class="v">${fmt(d.active_sessions)}</div><div class="l">active sessions (all keys)</div></div>
+    <div class="stat"><div class="v">${fmt(t.prompt_tokens)}</div><div class="l">prompt tokens</div></div>
+    <div class="stat"><div class="v">${fmt(t.completion_tokens)}</div><div class="l">completion tokens</div></div>
+    <div class="stat"><div class="v">${hit}</div><div class="l">cache hit (cached/prompt)</div></div>
+    <div class="stat"><div class="v ${t.errors ? 'err' : ''}">${fmt(t.errors)}</div><div class="l">errors (4xx/5xx)</div></div>
+    <div class="stat"><div class="v">${msf(pc.latency_p50 || 0)} <span class="mut" style="font-size:13px">/ ${msf(pc.latency_p95 || 0)}</span></div><div class="l">latency p50 / p95</div></div>
+    <div class="stat"><div class="v">${msf(pc.ttfb_p50 || 0)} <span class="mut" style="font-size:13px">/ ${msf(pc.ttfb_p95 || 0)}</span></div><div class="l">stream TTFB p50 / p95</div></div>
+  </div>
+  <div class="charts">
+    <div class="card"><h3 style="margin-top:0">Requests over time</h3>${legend(reqLayers)}${chart(series, d.bucket, reqLayers, { label: 'Requests over time' })}</div>
+    <div class="card"><h3 style="margin-top:0">Tokens over time</h3>${legend(tokLayers)}${chart(series, d.bucket, tokLayers, { label: 'Tokens over time' })}</div>
+    <div class="card"><h3 style="margin-top:0">Latency over time</h3>${legend(latLayers)}${chart(series, d.bucket, latLayers, { type: 'line', fmt: msf, label: 'Latency over time' })}</div>
+    <div class="card"><h3 style="margin-top:0">Cache hit rate over time</h3>${legend(hitLayers)}${chart(series, d.bucket, hitLayers, { type: 'line', fmt: v => v.toFixed(v < 10 ? 1 : 0) + '%', label: 'Cache hit rate' })}</div>
+    <div class="card"><h3 style="margin-top:0">Stop reasons</h3>${hbars((d.by_finish || []).map(r => ({ label: r.reason, value: r.requests, color: finishColor(r.reason) })))}
+      <p class="mut" style="font-size:12px">stop = natural end · tool_calls = model called a tool · length = hit max tokens (truncated) · "no finish" = stream ended without a finish reason (client/upstream dropped it). Click a request for its stream trace.</p></div>
+    <div class="card"><h3 style="margin-top:0">HTTP status</h3>${hbars((d.by_status || []).map(r => ({ label: String(r.status), value: r.requests, color: r.status >= 400 ? 'var(--err)' : 'var(--s1)' })))}
+      <h3>Tokens by model</h3>${hbars((d.by_model || []).slice(0, 8).map(r => ({ label: r.model || '—', value: r.prompt_tokens + r.completion_tokens, color: 'var(--s1)', text: compact(r.prompt_tokens + r.completion_tokens) })))}</div>
+  </div>
+  <div class="card"><h3 style="margin-top:0">By upstream key <span class="mut" style="text-transform:none">(click to filter)</span></h3>${keyRow('Key', d.by_upstream)}</div>
+  <div class="card"><h3 style="margin-top:0">By client key <span class="mut" style="text-transform:none">(click to filter)</span></h3>${keyRow('Client', d.by_client)}</div>
+  <div class="grid" style="grid-template-columns:2fr 1fr"><div class="card"><h3 style="margin-top:0">By model</h3>${table([['Model', r => esc(r.model || '—')], ['Requests', r => fmt(r.requests)], ['Prompt', r => fmt(r.prompt_tokens)], ['Completion', r => fmt(r.completion_tokens)], ['Avg latency', r => msf(r.avg_latency_ms)]], d.by_model)}</div>
+  <div class="card"><h3 style="margin-top:0">How sessions were identified</h3>${table([['Source', r => `<span class="tag">${esc(r.source)}</span>`], ['Requests', r => fmt(r.requests)]], d.by_source)}
+  <p class="mut" style="font-size:12px">header = client sent an ID · chain = message-prefix match · first = system+first-user match · new = fresh session. Lots of "new" means the agent rewrites history.</p></div></div>`;
+  const set = (h, c, u) => { el.dataset.h = h; el.dataset.c = c; el.dataset.u = u; overview(el); };
+  $('#hrs').onchange = e => set(e.target.value, cl, up);
+  $('#fc').onchange = e => set(hours, e.target.value, up);
+  $('#fu').onchange = e => set(hours, cl, e.target.value);
+  if ($('#clr')) $('#clr').onclick = () => set(hours, '', '');
+  const bind = (title, kind) => [...el.querySelectorAll('.card')].find(c => c.textContent.startsWith(title))?.querySelectorAll('tr.click').forEach((tr, i) => tr.onclick = () => set(hours, kind === 'c' ? d.by_client[i].id : cl, kind === 'u' ? d.by_upstream[i].id : up));
+  bind('By upstream key', 'u'); bind('By client key', 'c');
+}
+
+const stateTag = s => (s.expired || s.expires_at * 1000 <= Date.now()) ? '<span class="tag warn">expired</span>' : '<span class="tag ok">active</span>';
+
+async function sessions(el, preset) {
+  const f = el._f = Object.assign({ q: '', state: '' }, el._f, preset || {});
+  const rows = await api(`sessions?q=${encodeURIComponent(f.q)}&state=${f.state}&limit=200`);
+  el.innerHTML = `<h2>Sessions</h2><div class="row"><input id="q" placeholder="Search session id" value="${esc(f.q)}" style="min-width:280px">
+    <select id="st"><option value="">all</option><option value="active">active</option><option value="expired">expired</option></select><button id="s">Search</button></div>
+    <div class="card">${table([['Session', r => `<code>${esc(short(r.id))}</code>`], ['State', stateTag], ['Source', r => `<span class="tag">${esc(r.source)}</span>`], ['Client', r => esc(r.client_name)], ['Upstream', r => esc(r.upstream_name)],
+      ['Reqs', r => fmt(r.requests)], ['Prompt', r => fmt(r.prompt_tokens)], ['Cached', r => fmt(r.cached_tokens)], ['Completion', r => fmt(r.completion_tokens)], ['Last seen', r => ago(r.last_seen)], ['Expires', r => ago(r.expires_at)]], rows, { click: true })}</div>`;
+  $('#st').value = f.state;
+  $('#s').onclick = () => { f.q = $('#q').value; f.state = $('#st').value; sessions(el); };
+  $('#q').onkeydown = e => e.key === 'Enter' && $('#s').click();
+  el.querySelectorAll('tr.click').forEach(tr => tr.onclick = () => sessionDetail(rows[tr.dataset.i].id));
+}
+
+function modal(html) {
+  const m = document.createElement('div'); m.className = 'modal'; m.innerHTML = `<div>${html}</div>`;
+  m.onclick = e => { if (e.target === m) m.remove(); }; document.body.appendChild(m); return m;
+}
+
+async function sessionDetail(id) {
+  const d = await api('sessions/' + encodeURIComponent(id)), s = d.session;
+  const m = modal(`<div class="row"><h2 style="margin:0;flex:1">Session <code>${esc(s.id)}</code></h2><button class="sec sm" id="x">Close</button></div>
+    <p>${stateTag(s)} <span class="tag">${esc(s.source)}</span> created ${dt(s.created_at)} · last seen ${ago(s.last_seen)} · expires ${dt(s.expires_at)}</p>
+    <p>${fmt(s.requests)} requests · ${fmt(s.prompt_tokens)} prompt (${fmt(s.cached_tokens)} cached) · ${fmt(s.completion_tokens)} completion</p>
+    <div class="row"><button class="bad sm" id="ex">Expire now</button><span class="mut">Expiring drops the conversation fingerprints; the next matching request starts a new session (and may be pinned to another key).</span></div>
+    <h3>Requests (newest first)</h3>${reqTable(d.requests)}`);
+  $('#x', m).onclick = () => m.remove();
+  $('#ex', m).onclick = async () => { await api(`sessions/${encodeURIComponent(id)}/expire`, 'POST'); m.remove(); go(page); };
+  bindReqRows(m, d.requests);
+}
+
+const finishTag = r => r.status >= 400 ? '<span class="fr bad">http error</span>' : r.finish_reason ? `<span class="fr ${esc(r.finish_reason)}">${esc(r.finish_reason)}</span>` : r.stream ? '<span class="fr bad" title="stream ended without a finish reason">none</span>' : '<span class="mut">—</span>';
+const reqCols = [['Time', r => dt(r.ts)], ['Session', r => `<code>${esc(short(r.session_id || ''))}</code>`, ''], ['Via', r => `<span class="tag">${esc(r.session_source)}</span>`], ['Model', r => esc(r.model || '—')], ['Path', r => esc(r.path)],
+  ['Status', r => `<span class="${r.status >= 400 ? 'err' : 'ok'}">${r.status}</span>`], ['Stop', finishTag], ['Msgs', r => r.msg_count], ['In', r => fmt(r.prompt_tokens)], ['Cached', r => fmt(r.cached_tokens)], ['Out', r => fmt(r.completion_tokens)],
+  ['TTFB', r => r.ttfb_ms + 'ms'], ['Total', r => r.latency_ms + 'ms'], ['Stream', r => r.stream ? '✓' : '']];
+const reqTable = rows => table(reqCols, rows, { click: true });
+function bindReqRows(root, rows) { root.querySelectorAll('tr.click').forEach(tr => tr.onclick = () => requestDetail(rows[tr.dataset.i].id)); }
+
+const finishHelp = { stop: 'Model finished naturally.', tool_calls: 'Model stopped to call tool(s); the agent should send results back next.', length: 'Hit the max-token limit — the output was truncated.',
+  content_filter: 'Output blocked by a content filter.', error: 'Upstream reported a failure mid-response.', incomplete: 'Response ended incomplete.' };
+const kinds = { reason: ['Reasoning', 'var(--s4)'], text: ['Text', 'var(--s1)'], tool: ['Tool call args', 'var(--s2)'], usage: ['Usage', 'var(--mut)'] };
+
+function waterfall(r, tr) {
+  const total = Math.max(r.latency_ms, ...(tr?.spans || []).map(s => s.e), 1), pctOf = v => 100 * v / total;
+  const bar = (s, e, color, tipTxt) => `<i style="left:${pctOf(s)}%;width:${Math.max(pctOf(e - s), .4)}%;background:${color}" data-tip="${esc(tipTxt)}"></i>`;
+  const row = (label, inner, val) => `<div class="r"><div class="lbl">${label}</div><div class="lane">${inner}</div><div class="mut">${val}</div></div>`;
+  const first = tr?.first_ms || 0, rows = [];
+  rows.push(row('Upstream wait', bar(0, r.ttfb_ms, 'var(--mut)', `Request sent → response headers\n0 – ${r.ttfb_ms}ms`), msf(r.ttfb_ms)));
+  if (tr) {
+    if (first > r.ttfb_ms) rows.push(row('First token wait', bar(r.ttfb_ms, first, 'var(--s4)', `Headers → first content chunk\n${r.ttfb_ms} – ${first}ms`), msf(first - r.ttfb_ms)));
+    for (const k of ['reason', 'text', 'tool', 'usage']) {
+      const sp = tr.spans.filter(s => s.k === k); if (!sp.length) continue;
+      const dur = sp.reduce((a, s) => a + (s.e - s.s), 0);
+      rows.push(row(kinds[k][0], sp.map(s => bar(s.s, s.e, kinds[k][1], `${kinds[k][0]}\n${s.s} – ${s.e}ms (${s.e - s.s}ms)\n${s.n} chunk${s.n > 1 ? 's' : ''}, ${fmt(s.b)} bytes`)).join(''), `${sp.reduce((a, s) => a + s.n, 0)} ch · ${msf(dur)}`));
+    }
+    if (tr.spans.length >= 300) rows.push(`<div class="mut" style="font-size:11px;padding-left:138px">Timeline capped at 300 spans; the tail is merged into the last one.</div>`);
+  } else rows.push(row('Body download', bar(r.ttfb_ms, r.latency_ms, 'var(--s1)', `Headers → end of body\n${r.ttfb_ms} – ${r.latency_ms}ms`), msf(Math.max(0, r.latency_ms - r.ttfb_ms))));
+  rows.push(row('Total', bar(0, r.latency_ms, 'var(--acc)', `Total ${r.latency_ms}ms`), msf(r.latency_ms)));
+  const ticks = [0, .25, .5, .75, 1].map(f => `<span>${msf(total * f)}</span>`).join('');
+  return `<div class="wf">${rows.join('')}<div class="ax"><div></div><div class="t">${ticks}</div><div></div></div></div>`;
+}
+
+async function requestDetail(id) {
+  const r = await api('requests/' + id);
+  const pretty = s => { try { return JSON.stringify(JSON.parse(s), null, 2); } catch { return s; } };
+  let tr = null; try { tr = r.trace ? JSON.parse(r.trace) : null; } catch {}
+  const fin = r.status >= 400 ? 'http error' : r.finish_reason || (r.stream ? 'none' : '');
+  const why = r.status >= 400 ? 'The upstream returned an error status.' : r.finish_reason ? (finishHelp[r.finish_reason] || 'Reported by the upstream.') :
+    r.stream ? 'The stream ended without a finish_reason' + (tr && !tr.done ? ' or [DONE] — it was cut off' : '') + (r.error ? ' (' + r.error + ')' : '') + '.' : '';
+  const gen = tr && r.completion_tokens && r.latency_ms > tr.first_ms ? (1000 * r.completion_tokens / (r.latency_ms - tr.first_ms)).toFixed(1) + ' tok/s' : '—';
+  const m = modal(`<div class="row"><h2 style="margin:0;flex:1">Request #${r.id}</h2><button class="sec sm" id="x">Close</button></div>
+    <p>${dt(r.ts)} · <span class="${r.status >= 400 ? 'err' : 'ok'}">${r.status}</span> · ${esc(r.method)} <code>${esc(r.path)}</code> · ${esc(r.model || '')} · ${r.latency_ms}ms (ttfb ${r.ttfb_ms}ms)</p>
+    <p>Session <code>${esc(r.session_id)}</code> via <span class="tag">${esc(r.session_source)}</span> · upstream key #${r.upstream_key_id} · client key #${r.client_key_id} · ${fmt(r.prompt_tokens)} in (${fmt(r.cached_tokens)} cached) / ${fmt(r.completion_tokens)} out</p>
+    ${r.error ? `<p class="err">${esc(r.error)}</p>` : ''}
+    ${fin ? `<h3>Stop reason</h3><p><span class="tag fr ${r.status >= 400 || fin === 'none' ? 'bad' : esc(fin)}">${esc(fin)}</span> <span class="mut">${esc(why)}</span></p>` : ''}
+    <h3>Timeline ${tr ? '(streamed)' : ''}</h3>${waterfall(r, tr)}
+    ${tr ? `<div class="legend" style="margin-top:10px">${['reason', 'text', 'tool', 'usage'].map(k => `<span><i style="background:${kinds[k][1]}"></i>${kinds[k][0]}</span>`).join('')}</div>
+    <div class="row mut" style="font-size:12px"><span>${fmt(tr.chunks)} chunks</span><span>${fmt(tr.bytes)} bytes</span><span>first token ${msf(tr.first_ms)}</span><span>longest gap ${msf(tr.max_gap_ms)}</span><span>generation ${gen}</span><span>${tr.done ? 'terminated cleanly' : 'no [DONE]/completed event'}</span></div>` : ''}
+    <h3>Request body</h3><pre>${esc(pretty(r.req_body)) || '<span class="mut">(not logged)</span>'}</pre>
+    <h3>Response (${r.stream ? 'stream head + tail' : 'body'})</h3><pre>${esc(r.resp_body) || '<span class="mut">(not logged)</span>'}</pre>`);
+  $('#x', m).onclick = () => m.remove();
+}
+
+async function requests(el, preset) {
+  const f = el._f = Object.assign({ session: '', status: '', model: '', source: '', finish: '', client: '', upstream: '' }, el._f, preset || {});
+  const qs = Object.entries(f).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+  const [rows, cks, uks] = await Promise.all([api('requests?limit=200&' + qs), api('client-keys'), api('upstream-keys')]);
+  const kopt = (ks, v) => ks.map(k => `<option value="${k.id}" ${String(k.id) === String(v) ? 'selected' : ''}>${esc(k.name)}</option>`).join('');
+  el.innerHTML = `<h2>Requests</h2><div class="row"><input id="fs" placeholder="Session id (exact)" value="${esc(f.session)}" style="min-width:300px"><input id="fm" placeholder="Model" value="${esc(f.model)}">
+    <select id="fst"><option value="">any status</option><option value="ok">ok</option><option value="error">errors</option></select>
+    <select id="fso"><option value="">any source</option>${['header', 'chain', 'first', 'new'].map(s => `<option>${s}</option>`).join('')}</select>
+    <select id="ffi"><option value="">any stop reason</option>${['stop', 'tool_calls', 'length', 'content_filter', 'error'].map(s => `<option>${s}</option>`).join('')}</select>
+    <select id="fcl"><option value="">all client keys</option>${kopt(cks, f.client)}</select><select id="fup"><option value="">all upstream keys</option>${kopt(uks, f.upstream)}</select><button id="ap">Filter</button></div>
+    <div class="card">${reqTable(rows)}</div>`;
+  $('#fst').value = f.status; $('#fso').value = f.source; $('#ffi').value = f.finish;
+  $('#ap').onclick = () => { f.session = $('#fs').value.trim(); f.model = $('#fm').value.trim(); f.status = $('#fst').value; f.source = $('#fso').value; f.finish = $('#ffi').value; f.client = $('#fcl').value; f.upstream = $('#fup').value; requests(el); };
+  bindReqRows(el, rows);
+}
+
+async function upstream(el) {
+  const rows = await api('upstream-keys');
+  el.innerHTML = `<h2>Upstream OpenCode Go keys</h2>
+    <p class="mut">New sessions go to the enabled key with the fewest active sessions; an existing session stays on its key so provider-side routing/caching stays consistent. Disabling a key re-pins its sessions to another key on their next request.</p>
+    <div class="card"><div class="row"><input id="n" placeholder="Name (optional)"><input id="k" placeholder="OpenCode Go API key" type="password" style="min-width:320px"><button id="add">Add key</button></div>
+    ${table([['Name', r => esc(r.name)], ['Key', r => `<code>${esc(r.key)}</code>`], ['Enabled', r => r.enabled ? '<span class="ok">on</span>' : '<span class="mut">off</span>'], ['Active sessions', r => r.active_sessions], ['Requests', r => fmt(r.requests)], ['Tokens', r => fmt(r.tokens)], ['Errors 24h', r => `<span class="${r.errors_24h ? 'err' : ''}">${r.errors_24h}</span>`], ['Last used', r => ago(r.last_used)],
+      ['', r => `<button class="sec sm" data-t="${r.id}">${r.enabled ? 'Disable' : 'Enable'}</button> <button class="bad sm" data-d="${r.id}">Delete</button>`]], rows)}</div>`;
+  $('#add').onclick = async () => { try { await api('upstream-keys', 'POST', { name: $('#n').value, key: $('#k').value }); upstream(el); } catch (e) { toast(e.message); } };
+  el.querySelectorAll('[data-t]').forEach(b => b.onclick = async () => { const r = rows.find(x => x.id == b.dataset.t); await api('upstream-keys/' + r.id, 'PATCH', { enabled: !r.enabled }); upstream(el); });
+  el.querySelectorAll('[data-d]').forEach(b => b.onclick = async () => { if (confirm('Delete this key? Its sessions will be re-pinned.')) { await api('upstream-keys/' + b.dataset.d, 'DELETE'); upstream(el); } });
+}
+
+async function clients(el) {
+  const rows = await api('client-keys');
+  el.innerHTML = `<h2>Client keys (for your agents)</h2>
+    <p class="mut">Point your agent at <code>${esc(location.origin)}/v1</code> and use one of these as the API key. The real OpenCode keys never leave this server.</p>
+    <div class="card"><div class="row"><input id="n" placeholder="Name, e.g. my-agent"><button id="add">Create key</button></div>
+    ${table([['Name', r => esc(r.name)], ['Key', r => `<code>${esc(r.prefix)}…</code>`], ['Enabled', r => r.enabled ? '<span class="ok">on</span>' : '<span class="mut">off</span>'], ['Requests', r => fmt(r.requests)], ['Tokens', r => fmt(r.tokens)], ['Last used', r => ago(r.last_used)],
+      ['', r => `<button class="sec sm" data-t="${r.id}">${r.enabled ? 'Disable' : 'Enable'}</button> <button class="bad sm" data-d="${r.id}">Delete</button>`]], rows)}</div>`;
+  $('#add').onclick = async () => {
+    const r = await api('client-keys', 'POST', { name: $('#n').value });
+    const m = modal(`<h2>Key created</h2><p>Copy it now — it cannot be shown again.</p><pre>${esc(r.key)}</pre><button id="c">Done</button>`);
+    $('#c', m).onclick = () => { m.remove(); clients(el); };
+  };
+  el.querySelectorAll('[data-t]').forEach(b => b.onclick = async () => { const r = rows.find(x => x.id == b.dataset.t); await api('client-keys/' + r.id, 'PATCH', { enabled: !r.enabled }); clients(el); });
+  el.querySelectorAll('[data-d]').forEach(b => b.onclick = async () => { if (confirm('Delete this client key?')) { await api('client-keys/' + b.dataset.d, 'DELETE'); clients(el); } });
+}
+
+async function settings(el) {
+  const s = await api('settings');
+  el.innerHTML = `<h2>Settings</h2><div class="card" style="max-width:640px">
+    <p><label>Session TTL (hours, sliding)<br><input id="ttl" type="number" min="1" value="${esc(s.session_ttl_hours)}"></label><br>
+    <span class="mut">A session expires this long after its last request. Applies to a session's next request; existing expiry times are not rewritten.</span></p>
+    <p><label>Request log retention (days)<br><input id="ret" type="number" min="1" value="${esc(s.request_retention_days)}"></label></p>
+    <p><label><input type="checkbox" id="lb" ${s.log_bodies === '1' ? 'checked' : ''}> Store request/response bodies (truncated to 64 KB) for tracing</label></p>
+    <p><label><input type="checkbox" id="iu" ${s.inject_usage === '1' ? 'checked' : ''}> Add <code>stream_options.include_usage</code> to streamed chat requests so token usage is recorded</label></p>
+    <button id="sv">Save</button> <span id="ok" class="ok"></span></div>`;
+  $('#sv').onclick = async () => {
+    try { await api('settings', 'PUT', { session_ttl_hours: $('#ttl').value, request_retention_days: $('#ret').value, log_bodies: $('#lb').checked ? '1' : '0', inject_usage: $('#iu').checked ? '1' : '0' }); $('#ok').textContent = 'Saved'; }
+    catch (e) { toast(e.message); }
+  };
+}
+
+boot();
+</script>
+</body>
+</html>
