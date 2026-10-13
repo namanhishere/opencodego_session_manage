@@ -423,3 +423,49 @@ func TestAdminSettingsValidationAndModels(t *testing.T) {
 		t.Fatalf("%d %s", c, b)
 	}
 }
+
+func TestAttemptsRecordedAndInflightVisible(t *testing.T) {
+	release := make(chan struct{})
+	var n atomic.Int32
+	e := newEnv(t, func(w http.ResponseWriter, r *http.Request) {
+		switch n.Add(1) {
+		case 1:
+			w.WriteHeader(429)
+		case 2:
+			<-release // hold the second attempt open
+			io.WriteString(w, `{}`)
+		}
+	}, "K1")
+	fast(e)
+	e.st.SetSetting("retry_backoff_ms", "10")
+	p := e.px.Config.Handler.(*Proxy)
+	done := make(chan result)
+	go func() { done <- e.chat(t, []any{um("user", "hi")}) }()
+	var snap []map[string]any
+	for i := 0; i < 200 && len(snap) == 0 || (len(snap) > 0 && snap[0]["attempts"].(int) < 2 && i < 200); i++ {
+		time.Sleep(10 * time.Millisecond)
+		snap = p.inflight.Snapshot()
+	}
+	if len(snap) != 1 || snap[0]["attempts"].(int) != 2 || snap[0]["attempt_log"] != "429" || snap[0]["state"] != "waiting for upstream" {
+		t.Fatalf("inflight snapshot: %v", snap)
+	}
+	close(release)
+	if res := <-done; res.status != 200 {
+		t.Fatal(res.status)
+	}
+	if len(p.inflight.Snapshot()) != 0 {
+		t.Fatal("request still listed after completion")
+	}
+	var attempts int
+	var log string
+	for i := 0; i < 50; i++ {
+		e.st.db.QueryRow(`SELECT attempts, attempt_log FROM requests`).Scan(&attempts, &log)
+		if attempts != 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if attempts != 2 || log != "429 → 200" {
+		t.Fatalf("recorded %d %q", attempts, log)
+	}
+}

@@ -44,7 +44,9 @@ Network errors and upstream `408/425/429/500/502/503/504/529` are retried on the
 `retry_max` times (default 2, `0` = off) with exponential backoff (`retry_backoff_ms`, default 500, capped at 30 s).
 A `Retry-After` header is honoured, but over 10 s the error is returned right away (quota exhausted, not a blip).
 Retrying only happens before the response starts, so a stream that breaks midway is not replayed. Other 4xx are
-returned unchanged. The `x-proxy-attempts` response header tells how many upstream calls were made.
+returned unchanged. The `x-proxy-attempts` response header tells how many upstream calls were made; the Requests table shows it in a **Tries** column (e.g. `×3  429 → 429 → 200`).
+
+Dashboard → **Active** lists requests currently being processed (waiting on the upstream, backing off before a retry with a countdown, or streaming) with their attempts so far.
 
 ## Models and model mapping
 

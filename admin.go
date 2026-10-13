@@ -21,6 +21,7 @@ type Admin struct {
 	password string
 	secret   []byte
 	catalog  *ModelCatalog // set by main; enables /admin/api/models
+	inflight *Inflight     // set by main; enables /admin/api/inflight
 }
 
 func NewAdmin(st *Store, password string) *Admin {
@@ -112,6 +113,13 @@ func (a *Admin) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/api/sessions/{id}/expire", g(a.expireSession))
 	mux.HandleFunc("GET /admin/api/requests", g(a.listRequests))
 	mux.HandleFunc("GET /admin/api/requests/{id}", g(a.getRequest))
+	mux.HandleFunc("GET /admin/api/inflight", g(func(w http.ResponseWriter, r *http.Request) {
+		if a.inflight == nil {
+			writeJSON(w, 200, []any{})
+			return
+		}
+		writeJSON(w, 200, a.inflight.Snapshot())
+	}))
 	mux.HandleFunc("GET /admin/api/models", g(a.listModels))
 	mux.HandleFunc("GET /admin/api/settings", g(a.getSettings))
 	mux.HandleFunc("PUT /admin/api/settings", g(a.putSettings))
@@ -455,7 +463,7 @@ func (a *Admin) getSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqs, _ := a.query(`SELECT id, ts, method, path, model, stream, status, latency_ms, ttfb_ms, msg_count, prompt_tokens, completion_tokens,
-		cached_tokens, session_source, error, finish_reason FROM requests WHERE session_id=? ORDER BY id DESC LIMIT 500`, id)
+		cached_tokens, session_source, error, finish_reason, attempts, attempt_log FROM requests WHERE session_id=? ORDER BY id DESC LIMIT 500`, id)
 	writeJSON(w, 200, map[string]any{"session": s, "requests": reqs})
 }
 
@@ -495,7 +503,7 @@ func (a *Admin) listRequests(w http.ResponseWriter, r *http.Request) {
 	}
 	args = append(args, intParam(r, "limit", 100))
 	rows, err := a.query(`SELECT id, ts, session_id, session_source, client_key_id, upstream_key_id, method, path, model, stream, status,
-		latency_ms, ttfb_ms, msg_count, prompt_tokens, completion_tokens, cached_tokens, error, finish_reason
+		latency_ms, ttfb_ms, msg_count, prompt_tokens, completion_tokens, cached_tokens, error, finish_reason, attempts, attempt_log
 		FROM requests WHERE `+strings.Join(where, " AND ")+` ORDER BY id DESC LIMIT ?`, args...)
 	if err != nil {
 		fail(w, err)

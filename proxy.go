@@ -45,6 +45,7 @@ type Proxy struct {
 	upstream string // e.g. https://opencode.ai/zen/go/v1
 	client   *http.Client
 	catalog  *ModelCatalog
+	inflight *Inflight
 }
 
 func NewProxy(st *Store, rs *Resolver, upstream string) *Proxy {
@@ -59,6 +60,7 @@ func NewProxy(st *Store, rs *Resolver, upstream string) *Proxy {
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
 	}
+	p.inflight = NewInflight()
 	p.catalog = NewModelCatalog(st, p.upstream, p.client)
 	return p
 }
@@ -147,6 +149,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if logBodies {
 		rec.reqBody = trunc(body, maxLogBody)
 	}
+	live := &liveReq{start: start, session: sess.ID, source: sess.Source, client: clientID, upstream: upID, method: r.Method,
+		path: r.URL.Path, model: model, requestedModel: model, stream: stream, msgCount: fp.Count, state: "sending"}
+	p.inflight.add(live)
+	defer p.inflight.remove(live)
 
 	path := strings.TrimPrefix(r.URL.Path, "/v1")
 	target := p.upstream + path
@@ -154,7 +160,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		target += "?" + r.URL.RawQuery
 	}
 
-	resp, usedModel, attempts, err := p.forward(r, target, body, parsed, injected, model, sess.ID, upKey)
+	resp, usedModel, attempts, err := p.forward(r, target, body, parsed, injected, model, sess.ID, upKey, live)
+	rec.attempts, rec.attemptLog = attempts, strings.Join(live.trail, " → ")
 	w.Header().Set("x-proxy-attempts", strconv.Itoa(attempts))
 	if usedModel != "" && usedModel != model {
 		rec.model = usedModel
@@ -169,6 +176,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 	rec.ttfb = time.Since(start)
+	p.inflight.update(live, func(l *liveReq) { l.state = "streaming" })
 
 	for k, vs := range resp.Header {
 		if hopHeaders[http.CanonicalHeaderKey(k)] {
@@ -266,6 +274,8 @@ type reqRecord struct {
 	latency, ttfb     time.Duration
 	msgCount          int
 	errMsg            string
+	attempts          int
+	attemptLog        string
 	finish, trace     string
 	reqBody, respBody string
 }
@@ -275,10 +285,10 @@ func (p *Proxy) record(r reqRecord, u Usage) {
 		return
 	}
 	_, err := p.st.db.Exec(`INSERT INTO requests(ts,session_id,session_source,client_key_id,upstream_key_id,method,path,model,stream,status,
-		latency_ms,ttfb_ms,msg_count,prompt_tokens,completion_tokens,cached_tokens,error,req_body,resp_body,finish_reason,trace)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		latency_ms,ttfb_ms,msg_count,prompt_tokens,completion_tokens,cached_tokens,error,req_body,resp_body,finish_reason,trace,attempts,attempt_log)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ts, r.session, r.source, r.client, r.upstream, r.method, r.path, r.model, b2i(r.stream), r.status,
-		r.latency.Milliseconds(), r.ttfb.Milliseconds(), r.msgCount, u.Prompt, u.Completion, u.Cached, r.errMsg, r.reqBody, r.respBody, r.finish, r.trace)
+		r.latency.Milliseconds(), r.ttfb.Milliseconds(), r.msgCount, u.Prompt, u.Completion, u.Cached, r.errMsg, r.reqBody, r.respBody, r.finish, r.trace, max(r.attempts, 1), r.attemptLog)
 	if err != nil {
 		log.Printf("record request: %v", err)
 	}
@@ -393,7 +403,7 @@ func parseUsage(c *capture) Usage {
 // client, which is always the case here because the response is only returned once its status is final.
 // It returns the final response (error bodies are buffered so they can still be inspected), the model
 // that produced it and the number of upstream attempts made.
-func (p *Proxy) forward(r *http.Request, target string, body []byte, parsed map[string]any, dirty bool, model, sessionID, upKey string) (*http.Response, string, int, error) {
+func (p *Proxy) forward(r *http.Request, target string, body []byte, parsed map[string]any, dirty bool, model, sessionID, upKey string, live *liveReq) (*http.Response, string, int, error) {
 	ctx := r.Context()
 	targets := []string{model}
 	if parsed != nil && model != "" {
@@ -430,8 +440,10 @@ func (p *Proxy) forward(r *http.Request, target string, body []byte, parsed map[
 		}
 		lastModel = tm
 		last := ti == len(targets)-1
+		p.inflight.update(live, func(l *liveReq) { l.model = tm })
 		for attempt := 0; ; attempt++ {
 			attempts++
+			p.inflight.update(live, func(l *liveReq) { l.attempts, l.state, l.retryAt = attempts, "waiting for upstream", time.Time{} })
 			req, err := http.NewRequestWithContext(ctx, r.Method, target, bytes.NewReader(out))
 			if err != nil {
 				return nil, tm, attempts, err
@@ -456,6 +468,7 @@ func (p *Proxy) forward(r *http.Request, target string, body []byte, parsed map[
 				resp.Body = io.NopCloser(bytes.NewReader(errBody))
 			}
 			if err == nil && resp.StatusCode < 400 {
+				p.inflight.update(live, func(l *liveReq) { l.trail = append(l.trail, strconv.Itoa(resp.StatusCode)) })
 				return resp, tm, attempts, nil
 			}
 			if ctx.Err() != nil { // client went away: stop immediately
@@ -465,6 +478,14 @@ func (p *Proxy) forward(r *http.Request, target string, body []byte, parsed map[
 				return nil, tm, attempts, ctx.Err()
 			}
 			lastErr = err
+			lbl := statusLabel(0, err)
+			if err == nil {
+				lbl = statusLabel(resp.StatusCode, nil)
+			}
+			if len(targets) > 1 {
+				lbl += " (" + tm + ")"
+			}
+			p.inflight.update(live, func(l *liveReq) { l.trail = append(l.trail, lbl) })
 			if lastResp != nil {
 				lastResp.Body.Close()
 			}
@@ -487,6 +508,7 @@ func (p *Proxy) forward(r *http.Request, target string, body []byte, parsed map[
 						resp.Body.Close()
 						lastResp = nil
 					}
+					p.inflight.update(live, func(l *liveReq) { l.state, l.retryAt = "backing off before retry", time.Now().Add(wait) })
 					if !sleepCtx(ctx, wait) {
 						return nil, tm, attempts, ctx.Err()
 					}

@@ -67,13 +67,13 @@ async function api(path, method = 'GET', body) {
 const toast = m => alert(m);
 
 let page = 'overview', timer;
-const pages = { overview, sessions, requests, upstream, clients, settings };
+const pages = { overview, sessions, requests, active, upstream, clients, settings };
 
 function showLogin() { clearInterval(timer); document.onkeydown = null; location.href = '/admin/login'; }
 
 const AUTO_KEY = 'ocs_auto';
 let auto = (() => { try { return +(localStorage.getItem(AUTO_KEY) ?? 15); } catch { return 15; } })();
-const autoPages = ['overview', 'sessions', 'requests'];
+const autoPages = ['overview', 'sessions', 'requests', 'active'];
 
 async function boot() {
   try { await api('me'); } catch { return; }
@@ -119,7 +119,7 @@ function schedule() {
     // don't clobber a half-typed filter or an open detail view
     if (document.querySelector('.modal') || /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
     reload(true);
-  }, auto * 1000);
+  }, (page === 'active' ? Math.min(auto, 3) : auto) * 1000);
 }
 
 function go(p, arg) {
@@ -276,9 +276,10 @@ async function sessionDetail(id) {
 }
 
 const finishTag = r => r.status >= 400 ? '<span class="fr bad">http error</span>' : r.finish_reason ? `<span class="fr ${esc(r.finish_reason)}">${esc(r.finish_reason)}</span>` : r.stream ? '<span class="fr bad" title="stream ended without a finish reason">none</span>' : '<span class="mut">—</span>';
+const triesCell = r => r.attempts > 1 ? `<span class="err" title="${esc(r.attempt_log)}">×${r.attempts}</span> <span class="mut">${esc(r.attempt_log)}</span>` : '<span class="mut">1</span>';
 const reqCols = [['Time', r => dt(r.ts)], ['Session', r => `<code>${esc(short(r.session_id || ''))}</code>`, ''], ['Via', r => `<span class="tag">${esc(r.session_source)}</span>`], ['Model', r => esc(r.model || '—')], ['Path', r => esc(r.path)],
   ['Status', r => `<span class="${r.status >= 400 ? 'err' : 'ok'}">${r.status}</span>`], ['Stop', finishTag], ['Msgs', r => r.msg_count], ['In', r => fmt(r.prompt_tokens)], ['Cached', r => fmt(r.cached_tokens)], ['Out', r => fmt(r.completion_tokens)],
-  ['TTFB', r => r.ttfb_ms + 'ms'], ['Total', r => r.latency_ms + 'ms'], ['Stream', r => r.stream ? '✓' : '']];
+  ['Tries', triesCell], ['TTFB', r => r.ttfb_ms + 'ms'], ['Total', r => r.latency_ms + 'ms'], ['Stream', r => r.stream ? '✓' : '']];
 const reqTable = rows => table(reqCols, rows, { click: true });
 function bindReqRows(root, rows) { root.querySelectorAll('tr.click').forEach(tr => tr.onclick = () => requestDetail(rows[tr.dataset.i].id)); }
 
@@ -317,6 +318,7 @@ async function requestDetail(id) {
   const m = modal(`<div class="row"><h2 style="margin:0;flex:1">Request #${r.id}</h2><button class="sec sm" id="x">Close</button></div>
     <p>${dt(r.ts)} · <span class="${r.status >= 400 ? 'err' : 'ok'}">${r.status}</span> · ${esc(r.method)} <code>${esc(r.path)}</code> · ${esc(r.model || '')} · ${r.latency_ms}ms (ttfb ${r.ttfb_ms}ms)</p>
     <p>Session <code>${esc(r.session_id)}</code> via <span class="tag">${esc(r.session_source)}</span> · upstream key #${r.upstream_key_id} · client key #${r.client_key_id} · ${fmt(r.prompt_tokens)} in (${fmt(r.cached_tokens)} cached) / ${fmt(r.completion_tokens)} out</p>
+    ${r.attempts > 1 ? `<p>Attempts: <b>${r.attempts}</b> · <code>${esc(r.attempt_log)}</code></p>` : ''}
     ${r.error ? `<p class="err">${esc(r.error)}</p>` : ''}
     ${fin ? `<h3>Stop reason</h3><p><span class="tag fr ${r.status >= 400 || fin === 'none' ? 'bad' : esc(fin)}">${esc(fin)}</span> <span class="mut">${esc(why)}</span></p>` : ''}
     <h3>Timeline ${tr ? '(streamed)' : ''}</h3>${waterfall(r, tr)}
@@ -341,6 +343,17 @@ async function requests(el, preset) {
   $('#fst').value = f.status; $('#fso').value = f.source; $('#ffi').value = f.finish;
   $('#ap').onclick = () => { f.session = $('#fs').value.trim(); f.model = $('#fm').value.trim(); f.status = $('#fst').value; f.source = $('#fso').value; f.finish = $('#ffi').value; f.client = $('#fcl').value; f.upstream = $('#fup').value; requests(el); };
   bindReqRows(el, rows);
+}
+
+async function active(el) {
+  const rows = await api('inflight');
+  const st = r => r.retry_in_ms ? `<span class="err">backing off</span> <span class="mut">retry in ${msf(r.retry_in_ms)}</span>` : esc(r.state);
+  const mdl = r => r.requested_model && r.requested_model !== r.model ? `${esc(r.requested_model)} → ${esc(r.model)}` : esc(r.model || '—');
+  el.innerHTML = `<h2>In processing <span class="mut" style="font-size:14px">${rows.length} request${rows.length === 1 ? '' : 's'}</span></h2>
+    <div class="card">${table([['Started', r => dt(r.ts)], ['Elapsed', r => msf(r.elapsed_ms)], ['Session', r => `<code>${esc(short(r.session_id || ''))}</code>`], ['Via', r => `<span class="tag">${esc(r.session_source)}</span>`],
+      ['Model', mdl], ['Path', r => esc(r.path)], ['State', st], ['Tries', r => r.attempts > 1 ? `<span class="err">×${r.attempts}</span> <span class="mut">${esc(r.attempt_log)}</span>` : String(r.attempts)],
+      ['Msgs', r => r.msg_count], ['Received', r => r.bytes ? fmt(r.bytes) + ' B' : ''], ['Stream', r => r.stream ? '✓' : '']], rows)}</div>
+    <p class="mut">Requests currently waiting on the upstream, backing off between retries, or streaming. Finished requests move to Requests.</p>`;
 }
 
 async function upstream(el) {

@@ -45,6 +45,7 @@ func main() {
 	proxy := NewProxy(st, rs, env("UPSTREAM_URL", "https://opencode.ai/zen/go/v1"))
 	admin := NewAdmin(st, password)
 	admin.catalog = proxy.catalog
+	admin.inflight = proxy.inflight
 
 	mux := http.NewServeMux()
 	mux.Handle("/v1/", proxy)

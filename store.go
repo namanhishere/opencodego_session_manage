@@ -99,11 +99,12 @@ func OpenStore(path string) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
 	}
-	for _, col := range []string{"finish_reason", "trace"} {
+	for _, col := range [][2]string{{"finish_reason", "TEXT NOT NULL DEFAULT ''"}, {"trace", "TEXT NOT NULL DEFAULT ''"},
+		{"attempts", "INTEGER NOT NULL DEFAULT 1"}, {"attempt_log", "TEXT NOT NULL DEFAULT ''"}} {
 		var n int
-		db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('requests') WHERE name=?`, col).Scan(&n)
+		db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('requests') WHERE name=?`, col[0]).Scan(&n)
 		if n == 0 {
-			if _, err := db.Exec(`ALTER TABLE requests ADD COLUMN ` + col + ` TEXT NOT NULL DEFAULT ''`); err != nil {
+			if _, err := db.Exec(`ALTER TABLE requests ADD COLUMN ` + col[0] + ` ` + col[1]); err != nil {
 				return nil, err
 			}
 		}
