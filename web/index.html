@@ -75,7 +75,7 @@ function showLogin() {
   $('#app').innerHTML = `<div id="login" class="card"><h2>OpenCode Go Session Proxy</h2>
     <input id="pw" type="password" placeholder="Admin password" autofocus><button id="go" style="width:100%">Sign in</button><div id="le" class="err"></div></div>`;
   const go = async () => { try { await api('login', 'POST', { password: $('#pw').value }); boot(); } catch (e) { $('#le').textContent = e.message; } };
-  $('#go').onclick = go; $('#pw').onkeydown = e => e.key === 'Enter' && go();
+  $('#pw').focus(); $('#go').onclick = go; $('#pw').onkeydown = e => e.key === 'Enter' && go();
 }
 
 const AUTO_KEY = 'ocs_auto';
@@ -98,24 +98,39 @@ async function boot() {
 }
 
 let curArg, running = false;
-async function run() {
+// Auto-refresh re-renders after an async fetch, so anything typed or focused while the request was in
+// flight would be wiped. Track live field state and restore it once the render lands.
+const live = { vals: {}, focus: null };
+document.addEventListener('input', e => { const t = e.target; if (t.id) live.vals[t.id] = t.type === 'checkbox' ? t.checked : t.value; });
+document.addEventListener('focusin', e => { live.focus = e.target.id || null; });
+function restoreLive() {
+  for (const [id, v] of Object.entries(live.vals)) {
+    const e = document.getElementById(id); if (!e || !e.closest('#main')) continue;
+    if (e.type === 'checkbox') e.checked = v; else if (e.value !== v) e.value = v;
+  }
+  const f = live.focus && document.getElementById(live.focus);
+  if (f && f !== document.activeElement && f.closest('#main')) { f.focus(); try { f.setSelectionRange(f.value.length, f.value.length); } catch {} }
+}
+
+async function run(quiet) {
   const btn = $('#rl'); if (running || !btn) return; running = true; btn.classList.add('spin');
-  try { await pages[page]($('#main'), curArg); const u = $('#upd'); if (u) u.textContent = 'updated ' + new Date().toLocaleTimeString(); }
+  if (!quiet) live.vals = {};
+  try { await pages[page]($('#main'), curArg); if (quiet) restoreLive(); const u = $('#upd'); if (u) u.textContent = 'updated ' + new Date().toLocaleTimeString(); }
   catch (e) { if (e.message !== 'unauthorized') $('#main').innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
   finally { running = false; btn.classList.remove('spin'); }
 }
-const reload = () => { curArg = undefined; return run(); };
+const reload = quiet => { curArg = undefined; return run(quiet === true); };
 function schedule() {
   clearInterval(timer);
   if (auto && autoPages.includes(page)) timer = setInterval(() => {
     // don't clobber a half-typed filter or an open detail view
     if (document.querySelector('.modal') || /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
-    reload();
+    reload(true);
   }, auto * 1000);
 }
 
 function go(p, arg) {
-  page = p; location.hash = p; curArg = arg;
+  live.vals = {}; page = p; location.hash = p; curArg = arg;
   document.querySelectorAll('nav a').forEach(a => a.classList.toggle('on', a.dataset.p === p));
   run(); schedule();
 }
