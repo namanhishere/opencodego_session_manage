@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -43,10 +44,11 @@ type Proxy struct {
 	rs       *Resolver
 	upstream string // e.g. https://opencode.ai/zen/go/v1
 	client   *http.Client
+	catalog  *ModelCatalog
 }
 
 func NewProxy(st *Store, rs *Resolver, upstream string) *Proxy {
-	return &Proxy{
+	p := &Proxy{
 		st: st, rs: rs, upstream: strings.TrimRight(upstream, "/"),
 		client: &http.Client{
 			Transport: &http.Transport{
@@ -57,6 +59,8 @@ func NewProxy(st *Store, rs *Resolver, upstream string) *Proxy {
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
 	}
+	p.catalog = NewModelCatalog(st, p.upstream, p.client)
+	return p
 }
 
 func apiError(w http.ResponseWriter, status int, msg string) {
@@ -83,6 +87,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	clientID, ok := p.authClient(r)
 	if !ok {
 		apiError(w, http.StatusUnauthorized, "invalid or missing proxy API key")
+		return
+	}
+	if r.Method == http.MethodGet && strings.TrimSuffix(r.URL.Path, "/") == "/v1/models" {
+		p.serveModels(w, r)
 		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBody))
@@ -118,7 +126,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ask for token usage on streamed chat completions so tracing/usage is accurate
-	outBody := body
+	injected := false
 	if parsed != nil && stream && strings.HasSuffix(r.URL.Path, "/chat/completions") && p.st.Setting("inject_usage", "1") == "1" {
 		so, _ := parsed["stream_options"].(map[string]any)
 		if so == nil {
@@ -127,9 +135,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if _, set := so["include_usage"]; !set {
 			so["include_usage"] = true
 			parsed["stream_options"] = so
-			if nb, err := json.Marshal(parsed); err == nil {
-				outBody = nb
-			}
+			injected = true
 		}
 	}
 
@@ -147,24 +153,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}
-	req, err := http.NewRequestWithContext(r.Context(), r.Method, target, bytes.NewReader(outBody))
-	if err != nil {
-		apiError(w, http.StatusBadGateway, err.Error())
-		return
-	}
-	for k, vs := range r.Header {
-		if hopHeaders[http.CanonicalHeaderKey(k)] || strings.EqualFold(k, "x-opencode-session") {
-			continue
-		}
-		for _, v := range vs {
-			req.Header.Add(k, v)
-		}
-	}
-	req.Header.Set("Authorization", "Bearer "+upKey)
-	req.Header.Set("x-opencode-session", sess.ID)
-	req.ContentLength = int64(len(outBody))
 
-	resp, err := p.client.Do(req)
+	resp, usedModel, attempts, err := p.forward(r, target, body, parsed, injected, model, sess.ID, upKey)
+	w.Header().Set("x-proxy-attempts", strconv.Itoa(attempts))
+	if usedModel != "" && usedModel != model {
+		rec.model = usedModel
+		w.Header().Set("x-proxy-model", usedModel)
+	}
 	if err != nil {
 		rec.status, rec.errMsg = http.StatusBadGateway, err.Error()
 		rec.latency = time.Since(start)
@@ -390,4 +385,122 @@ func parseUsage(c *capture) Usage {
 		}
 	}
 	return Usage{}
+}
+
+// forward sends the request upstream, retrying transient failures (network errors, 408/429/5xx) with
+// exponential backoff on the same key, and walking the model chain (see modelTargets) when a model is
+// rejected or keeps failing. Retrying is only possible until the first response byte reaches the
+// client, which is always the case here because the response is only returned once its status is final.
+// It returns the final response (error bodies are buffered so they can still be inspected), the model
+// that produced it and the number of upstream attempts made.
+func (p *Proxy) forward(r *http.Request, target string, body []byte, parsed map[string]any, dirty bool, model, sessionID, upKey string) (*http.Response, string, int, error) {
+	ctx := r.Context()
+	targets := []string{model}
+	if parsed != nil && model != "" {
+		targets = modelTargets(p.st, model)
+		if len(targets) > 1 {
+			// skip targets the upstream does not list, as long as one remains
+			var ok []string
+			for _, t := range targets {
+				if listed, known := p.catalog.Known(ctx, t); !known || listed {
+					ok = append(ok, t)
+				}
+			}
+			if len(ok) > 0 {
+				targets = ok
+			}
+		}
+	}
+	maxRetries := p.st.SettingInt("retry_max", 2)
+	attempts := 0
+	var lastResp *http.Response
+	var lastErr error
+	var lastModel string
+	for ti, tm := range targets {
+		out := body
+		if parsed != nil && (dirty || tm != model) {
+			if tm != model {
+				parsed["model"] = tm
+			}
+			nb, err := json.Marshal(parsed)
+			if err != nil {
+				return nil, tm, attempts, err
+			}
+			out = nb
+		}
+		lastModel = tm
+		last := ti == len(targets)-1
+		for attempt := 0; ; attempt++ {
+			attempts++
+			req, err := http.NewRequestWithContext(ctx, r.Method, target, bytes.NewReader(out))
+			if err != nil {
+				return nil, tm, attempts, err
+			}
+			for k, vs := range r.Header {
+				if hopHeaders[http.CanonicalHeaderKey(k)] || strings.EqualFold(k, "x-opencode-session") {
+					continue
+				}
+				for _, v := range vs {
+					req.Header.Add(k, v)
+				}
+			}
+			req.Header.Set("Authorization", "Bearer "+upKey)
+			req.Header.Set("x-opencode-session", sessionID)
+			req.ContentLength = int64(len(out))
+
+			resp, err := p.client.Do(req)
+			var errBody []byte
+			if err == nil && resp.StatusCode >= 400 {
+				errBody, _ = io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+				resp.Body.Close()
+				resp.Body = io.NopCloser(bytes.NewReader(errBody))
+			}
+			if err == nil && resp.StatusCode < 400 {
+				return resp, tm, attempts, nil
+			}
+			if ctx.Err() != nil { // client went away: stop immediately
+				if err == nil {
+					resp.Body.Close()
+				}
+				return nil, tm, attempts, ctx.Err()
+			}
+			lastErr = err
+			if lastResp != nil {
+				lastResp.Body.Close()
+			}
+			lastResp = resp
+			if err == nil && !retryStatus[resp.StatusCode] {
+				if !last && modelRejected(resp.StatusCode, errBody) {
+					log.Printf("session %s: model %q rejected (%d), trying next", sessionID, tm, resp.StatusCode)
+					break
+				}
+				return resp, tm, attempts, nil // permanent client error: report as is
+			}
+			if attempt < maxRetries {
+				if wait, ok := retryWait(p.st, attempt, resp); ok {
+					if err != nil {
+						log.Printf("session %s: upstream error %v, retry %d/%d in %s", sessionID, err, attempt+1, maxRetries, wait)
+					} else {
+						log.Printf("session %s: upstream %d, retry %d/%d in %s", sessionID, resp.StatusCode, attempt+1, maxRetries, wait)
+					}
+					if resp != nil {
+						resp.Body.Close()
+						lastResp = nil
+					}
+					if !sleepCtx(ctx, wait) {
+						return nil, tm, attempts, ctx.Err()
+					}
+					continue
+				}
+			}
+			if !last {
+				log.Printf("session %s: model %q kept failing, trying next", sessionID, tm)
+			}
+			break
+		}
+	}
+	if lastResp != nil {
+		return lastResp, lastModel, attempts, nil
+	}
+	return nil, lastModel, attempts, lastErr
 }

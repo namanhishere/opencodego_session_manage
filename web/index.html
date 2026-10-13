@@ -381,9 +381,25 @@ async function settings(el) {
     <p><label><input type="checkbox" id="lb" ${s.log_bodies === '1' ? 'checked' : ''}> Store request/response bodies (truncated to 64 KB) for tracing</label></p>
     <p><label><input type="checkbox" id="iu" ${s.inject_usage === '1' ? 'checked' : ''}> Add <code>stream_options.include_usage</code> to streamed chat requests so token usage is recorded</label></p>
     <p><label><input type="checkbox" id="ic" ${s.ignore_client_session === '1' ? 'checked' : ''}> Overwrite the client's <code>x-opencode-session</code> header: ignore it and always use the session derived from the conversation</label></p>
+    <h3>Retry</h3>
+    <p><label>Max retries on network errors / 408, 429, 5xx<br><input id="rm" type="number" min="0" max="10" value="${esc(s.retry_max)}"></label>
+    <label style="margin-left:12px">Backoff base (ms, doubles each retry)<br><input id="rb" type="number" min="1" value="${esc(s.retry_backoff_ms)}"></label><br>
+    <span class="mut">Retries go to the same upstream key (no key failover). A <code>Retry-After</code> over 10 s is not waited for. 0 disables retrying.</span></p>
+    <h3>Models</h3>
+    <p><label>Model mapping — one per line: <code>requested = target, fallback, …</code><br><textarea id="mm" rows="5" style="width:100%;font-family:monospace">${esc(s.model_map)}</textarea></label><br>
+    <span class="mut">The first target replaces the requested model; later ones are tried if it is rejected (404 / unknown model) or keeps failing. Mapped names are also listed by <code>GET /v1/models</code>.</span></p>
+    <p><label>Global fallback model (tried last, and used when a model is not in the upstream list)<br><input id="fm" value="${esc(s.fallback_model)}" placeholder="e.g. glm-5"></label></p>
+    <p><button id="fe" type="button">Fetch upstream models</button> <span id="fs" class="mut"></span><br><span id="fl" class="mut"></span></p>
     <button id="sv">Save</button> <span id="ok" class="ok"></span></div>`;
+  $('#fe').onclick = async () => {
+    try {
+      const r = await api('models?refresh=1');
+      $('#fs').textContent = r.error ? 'Error: ' + r.error : (r.data.length + ' models');
+      $('#fl').innerHTML = (r.data || []).map(m => '<code>' + esc(m.id) + '</code>').join(' ');
+    } catch (e) { toast(e.message); }
+  };
   $('#sv').onclick = async () => {
-    try { await api('settings', 'PUT', { session_ttl_hours: $('#ttl').value, request_retention_days: $('#ret').value, log_requests: $('#lr').checked ? '1' : '0', ignore_client_session: $('#ic').checked ? '1' : '0', log_bodies: $('#lb').checked ? '1' : '0', inject_usage: $('#iu').checked ? '1' : '0' }); $('#ok').textContent = 'Saved'; }
+    try { await api('settings', 'PUT', { session_ttl_hours: $('#ttl').value, request_retention_days: $('#ret').value, log_requests: $('#lr').checked ? '1' : '0', ignore_client_session: $('#ic').checked ? '1' : '0', log_bodies: $('#lb').checked ? '1' : '0', inject_usage: $('#iu').checked ? '1' : '0', retry_max: $('#rm').value, retry_backoff_ms: $('#rb').value, model_map: $('#mm').value, fallback_model: $('#fm').value.trim() }); $('#ok').textContent = 'Saved'; }
     catch (e) { toast(e.message); }
   };
 }

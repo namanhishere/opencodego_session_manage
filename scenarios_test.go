@@ -561,9 +561,9 @@ func TestConcurrentDistinctConversationsNoCrossTalk(t *testing.T) {
 
 func TestQueryStringAndPathMapping(t *testing.T) {
 	e := newEnv(t, nil, "K")
-	e.do(t, "GET", "/v1/models?foo=bar&x=1", e.ck, nil, nil)
+	e.do(t, "GET", "/v1/files?foo=bar&x=1", e.ck, nil, nil)
 	req, _ := e.lastReq()
-	if req.URL.Path != "/models" || req.URL.RawQuery != "foo=bar&x=1" || req.Method != "GET" {
+	if req.URL.Path != "/files" || req.URL.RawQuery != "foo=bar&x=1" || req.Method != "GET" {
 		t.Fatalf("%s %s?%s", req.Method, req.URL.Path, req.URL.RawQuery)
 	}
 }

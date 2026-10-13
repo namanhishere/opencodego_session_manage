@@ -20,6 +20,7 @@ type Admin struct {
 	st       *Store
 	password string
 	secret   []byte
+	catalog  *ModelCatalog // set by main; enables /admin/api/models
 }
 
 func NewAdmin(st *Store, password string) *Admin {
@@ -111,6 +112,7 @@ func (a *Admin) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/api/sessions/{id}/expire", g(a.expireSession))
 	mux.HandleFunc("GET /admin/api/requests", g(a.listRequests))
 	mux.HandleFunc("GET /admin/api/requests/{id}", g(a.getRequest))
+	mux.HandleFunc("GET /admin/api/models", g(a.listModels))
 	mux.HandleFunc("GET /admin/api/settings", g(a.getSettings))
 	mux.HandleFunc("PUT /admin/api/settings", g(a.putSettings))
 }
@@ -520,7 +522,14 @@ var settingDefaults = map[string]string{
 	"inject_usage":           "1",
 	"log_requests":           "1",
 	"ignore_client_session":  "0",
+	"retry_max":              "2",
+	"retry_backoff_ms":       "500",
+	"model_map":              "",
+	"fallback_model":         "",
 }
+
+// textSettings are free-form; retry_max may be 0 (retries off).
+var textSettings = map[string]bool{"model_map": true, "fallback_model": true}
 
 var boolSettings = map[string]bool{"log_bodies": true, "inject_usage": true, "log_requests": true, "ignore_client_session": true}
 
@@ -542,7 +551,19 @@ func (a *Admin) putSettings(w http.ResponseWriter, r *http.Request) {
 		if _, ok := settingDefaults[k]; !ok {
 			continue
 		}
-		if !boolSettings[k] {
+		switch {
+		case k == "model_map":
+			if _, err := parseModelMap(v); err != nil {
+				writeJSON(w, 400, map[string]any{"error": "model_map: " + err.Error()})
+				return
+			}
+		case textSettings[k], boolSettings[k]:
+		case k == "retry_max":
+			if n, err := strconv.Atoi(v); err != nil || n < 0 || n > 10 {
+				writeJSON(w, 400, map[string]any{"error": "retry_max must be an integer between 0 and 10"})
+				return
+			}
+		default:
 			if n, err := strconv.Atoi(v); err != nil || n < 1 {
 				writeJSON(w, 400, map[string]any{"error": k + " must be a positive integer"})
 				return
@@ -557,3 +578,17 @@ func (a *Admin) putSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 var _ = sql.ErrNoRows
+
+// listModels returns the upstream model list (plus aliases); ?refresh=1 bypasses the cache.
+func (a *Admin) listModels(w http.ResponseWriter, r *http.Request) {
+	if a.catalog == nil {
+		writeJSON(w, 503, map[string]any{"error": "model catalog unavailable"})
+		return
+	}
+	list, err := a.catalog.List(r.Context(), r.URL.Query().Get("refresh") == "1")
+	out := map[string]any{"data": list}
+	if err != nil {
+		out["error"] = err.Error()
+	}
+	writeJSON(w, 200, out)
+}

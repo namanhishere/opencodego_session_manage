@@ -33,10 +33,29 @@ a prompt prefix anyway); `previous_response_id` (responses API) is not tracked y
 compaction the fallback may keep the session, but the provider cache is cold regardless.
 
 A session is pinned to one upstream key for its lifetime; new sessions go to the enabled key with the
-fewest active sessions. There is deliberately no failover on 429/quota errors — switching keys mid
+fewest active sessions. There is deliberately no failover to another key on 429/quota errors — switching keys mid
 conversation loses the cache and would amount to evading per-key limits. Session TTL (default 24 h,
 sliding) is configurable in Settings; expired sessions stay visible for tracing until request retention
 (default 30 days) removes them.
+
+## Retries
+
+Network errors and upstream `408/425/429/500/502/503/504/529` are retried on the **same** upstream key, up to
+`retry_max` times (default 2, `0` = off) with exponential backoff (`retry_backoff_ms`, default 500, capped at 30 s).
+A `Retry-After` header is honoured, but over 10 s the error is returned right away (quota exhausted, not a blip).
+Retrying only happens before the response starts, so a stream that breaks midway is not replayed. Other 4xx are
+returned unchanged. The `x-proxy-attempts` response header tells how many upstream calls were made.
+
+## Models and model mapping
+
+- `GET /v1/models` returns the upstream model list (fetched with an enabled upstream key, cached 5 min, served stale
+  if the upstream is down) plus every alias from the mapping. Dashboard → Settings → *Fetch upstream models* refreshes it.
+- **Model mapping** (Settings, one rule per line): `requested = target, fallback1, fallback2`. The request's `model` is
+  rewritten to the first target; the next one is tried if the model is rejected (404, or 400/422 saying the model is
+  unknown/unsupported) or still fails with a retryable error after the retries above.
+- **Global fallback model** is appended to every chain, so it is also used for models the upstream does not know. Targets
+  that are absent from a known upstream list are skipped while at least one other candidate remains.
+- The model actually used is returned in `x-proxy-model` (only when it differs) and stored in the request log.
 
 ## Dashboard
 
