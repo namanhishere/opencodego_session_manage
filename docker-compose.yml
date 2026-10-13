@@ -1,0 +1,15 @@
+services:
+  proxy:
+    build: .
+    image: ocproxy
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env or your shell}
+      UPSTREAM_URL: ${UPSTREAM_URL:-https://opencode.ai/zen/go/v1}
+    volumes:
+      - ocdata:/data
+
+volumes:
+  ocdata:

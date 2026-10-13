@@ -479,7 +479,11 @@ var settingDefaults = map[string]string{
 	"request_retention_days": "30",
 	"log_bodies":             "1",
 	"inject_usage":           "1",
+	"log_requests":           "1",
+	"ignore_client_session":  "0",
 }
+
+var boolSettings = map[string]bool{"log_bodies": true, "inject_usage": true, "log_requests": true, "ignore_client_session": true}
 
 func (a *Admin) getSettings(w http.ResponseWriter, r *http.Request) {
 	out := map[string]string{}
@@ -499,7 +503,7 @@ func (a *Admin) putSettings(w http.ResponseWriter, r *http.Request) {
 		if _, ok := settingDefaults[k]; !ok {
 			continue
 		}
-		if k != "log_bodies" && k != "inject_usage" {
+		if !boolSettings[k] {
 			if n, err := strconv.Atoi(v); err != nil || n < 1 {
 				writeJSON(w, 400, map[string]any{"error": k + " must be a positive integer"})
 				return

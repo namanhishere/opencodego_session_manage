@@ -102,7 +102,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	fp := ComputeFingerprints(clientID, parsed)
 
-	sess, err := p.rs.Resolve(clientID, strings.TrimSpace(r.Header.Get("x-opencode-session")), fp)
+	clientSession := strings.TrimSpace(r.Header.Get("x-opencode-session"))
+	if p.st.Setting("ignore_client_session", "0") == "1" {
+		clientSession = "" // always derive the session from the message chain
+	}
+	sess, err := p.rs.Resolve(clientID, clientSession, fp)
 	if err != nil {
 		apiError(w, http.StatusServiceUnavailable, err.Error())
 		return
@@ -272,6 +276,9 @@ type reqRecord struct {
 }
 
 func (p *Proxy) record(r reqRecord, u Usage) {
+	if p.st.Setting("log_requests", "1") != "1" {
+		return
+	}
 	_, err := p.st.db.Exec(`INSERT INTO requests(ts,session_id,session_source,client_key_id,upstream_key_id,method,path,model,stream,status,
 		latency_ms,ttfb_ms,msg_count,prompt_tokens,completion_tokens,cached_tokens,error,req_body,resp_body,finish_reason,trace)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,

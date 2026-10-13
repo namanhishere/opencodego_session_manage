@@ -1188,3 +1188,30 @@ func TestAdminLogout(t *testing.T) {
 	a.req(t, "POST", "/admin/api/logout", nil, true, xa)
 	// cookie value is cleared client-side only; confirm endpoint responds
 }
+
+func TestLogRequestsOff(t *testing.T) {
+	e := newEnv(t, nil, "K")
+	e.st.SetSetting("log_requests", "0")
+	r := e.chat(t, []any{um("user", "x")})
+	var n int
+	e.st.db.QueryRow(`SELECT COUNT(*) FROM requests`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("%d requests logged while disabled", n)
+	}
+	var cnt int
+	e.st.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE id=?`, r.session).Scan(&cnt)
+	if cnt != 1 {
+		t.Fatal("session not tracked")
+	}
+}
+
+func TestIgnoreClientSessionHeader(t *testing.T) {
+	e := newEnv(t, nil, "K")
+	e.st.SetSetting("ignore_client_session", "1")
+	a := e.chat(t, []any{um("user", "hello")})
+	b := e.do(t, "POST", "/v1/chat/completions", e.ck, map[string]any{"messages": []any{um("user", "hello"), um("assistant", "a"), um("user", "b")}},
+		map[string]string{"x-opencode-session": "explicit"})
+	if a.session != b.session || b.session == "explicit" {
+		t.Fatalf("client header not overridden: %s vs %s", a.session, b.session)
+	}
+}

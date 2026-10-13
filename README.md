@@ -7,6 +7,7 @@ caching), pools several OpenCode Go API keys, and gives you an admin dashboard f
 ## Run
 
     ADMIN_PASSWORD=change-me go run .          # dashboard: http://localhost:8080/admin
+    # or: docker compose up -d --build   (needs ADMIN_PASSWORD in .env)
     # or: docker build -t ocproxy . && docker run -p 8080:8080 -v ocdata:/data -e ADMIN_PASSWORD=... ocproxy
 
 1. Open `/admin`, add your OpenCode Go key(s) under **Upstream keys**.
@@ -14,6 +15,7 @@ caching), pools several OpenCode Go API keys, and gives you an admin dashboard f
 3. Point the agent at `http://<host>:8080/v1` with that key. Both `/v1/chat/completions` and `/v1/responses` work.
 
 Env: `ADMIN_PASSWORD` (required), `LISTEN` (`:8080`), `DB_PATH` (`data/proxy.db`), `UPSTREAM_URL` (`https://opencode.ai/zen/go/v1`).
+Settings (dashboard → Settings) also let you turn off request logging entirely (`log_requests`) or ignore the client's `x-opencode-session` header and always derive the session from the conversation (`ignore_client_session`).
 Put it behind TLS (reverse proxy) if it is not on a private network.
 
 ## How a request is mapped to a session
