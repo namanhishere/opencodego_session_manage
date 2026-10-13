@@ -9,7 +9,7 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env or your shell}
       UPSTREAM_URL: ${UPSTREAM_URL:-https://opencode.ai/zen/go/v1}
     volumes:
-      - ocdata:/data
+      - ./ocdata:/data
 
 volumes:
   ocdata:

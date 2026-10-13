@@ -21,3 +21,6 @@ coverage.*
 .env
 .env.*
 .claude/
+
+
+ocdata/

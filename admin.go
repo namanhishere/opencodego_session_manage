@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -52,10 +53,14 @@ func (a *Admin) valid(tok string) bool {
 	return hmac.Equal([]byte(tok), []byte(a.sign(exp)))
 }
 
+func (a *Admin) authed(r *http.Request) bool {
+	c, err := r.Cookie(cookieName)
+	return err == nil && a.valid(c.Value)
+}
+
 func (a *Admin) guard(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c, err := r.Cookie(cookieName)
-		if err != nil || !a.valid(c.Value) {
+		if !a.authed(r) {
 			writeJSON(w, 401, map[string]any{"error": "unauthorized"})
 			return
 		}
@@ -83,6 +88,8 @@ func fail(w http.ResponseWriter, err error) {
 }
 
 func (a *Admin) Routes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /admin/login", a.loginPage)
+	mux.HandleFunc("POST /admin/login", a.loginForm)
 	mux.HandleFunc("POST /admin/api/login", a.login)
 	mux.HandleFunc("POST /admin/api/logout", func(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{Name: cookieName, Path: "/admin", MaxAge: -1})
@@ -108,17 +115,49 @@ func (a *Admin) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /admin/api/settings", g(a.putSettings))
 }
 
-func (a *Admin) login(w http.ResponseWriter, r *http.Request) {
-	var in struct{ Password string }
-	if decode(r, &in) != nil || subtle.ConstantTimeCompare([]byte(in.Password), []byte(a.password)) != 1 {
-		time.Sleep(700 * time.Millisecond) // slows brute force
-		writeJSON(w, 401, map[string]any{"error": "wrong password"})
-		return
+// checkPassword verifies pw and, on success, sets the session cookie. On failure it sleeps to slow brute force.
+func (a *Admin) checkPassword(w http.ResponseWriter, r *http.Request, pw string) bool {
+	if subtle.ConstantTimeCompare([]byte(pw), []byte(a.password)) != 1 {
+		time.Sleep(700 * time.Millisecond)
+		return false
 	}
 	exp := time.Now().Add(12 * time.Hour)
 	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: a.sign(exp.Unix()), Path: "/admin", Expires: exp,
 		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"})
+	return true
+}
+
+func (a *Admin) login(w http.ResponseWriter, r *http.Request) {
+	var in struct{ Password string }
+	if decode(r, &in) != nil || !a.checkPassword(w, r, in.Password) {
+		writeJSON(w, 401, map[string]any{"error": "wrong password"})
+		return
+	}
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// loginPage serves the static sign-in form (plain HTML, no JS).
+func (a *Admin) loginPage(w http.ResponseWriter, r *http.Request) {
+	if a.authed(r) {
+		http.Redirect(w, r, "/admin", http.StatusFound)
+		return
+	}
+	page := loginHTML
+	if r.URL.Query().Get("err") != "" {
+		page = bytes.Replace(page, []byte("<!--ERR-->"), []byte(`<div class="err">Wrong password</div>`), 1)
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(page)
+}
+
+func (a *Admin) loginForm(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
+	if r.ParseForm() != nil || !a.checkPassword(w, r, r.PostForm.Get("password")) {
+		http.Redirect(w, r, "/admin/login?err=1", http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 
 // query runs SQL and returns rows as maps (column -> value) for direct JSON output.

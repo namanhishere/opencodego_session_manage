@@ -15,6 +15,9 @@ import (
 //go:embed web/index.html
 var indexHTML []byte
 
+//go:embed web/login.html
+var loginHTML []byte
+
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
@@ -46,12 +49,16 @@ func main() {
 	mux.Handle("/v1/", proxy)
 	admin.Routes(mux)
 	page := func(w http.ResponseWriter, r *http.Request) {
+		if !admin.authed(r) {
+			http.Redirect(w, r, "/admin/login", http.StatusFound)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		w.Write(indexHTML)
 	}
 	mux.HandleFunc("GET /admin", page)
-	mux.HandleFunc("GET /admin/", page)
+	mux.HandleFunc("GET /admin/{$}", page)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/admin", http.StatusFound) })
 

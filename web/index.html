@@ -42,7 +42,6 @@ h2{margin:0 0 12px;font-size:16px}h3{margin:14px 0 6px;font-size:13px;color:var(
 button.spin::before{content:"";display:inline-block;width:10px;height:10px;margin-right:6px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-1px}@keyframes sp{to{transform:rotate(360deg)}}
 .fr{font-size:12px}.fr.stop{color:var(--ok)}.fr.length,.fr.incomplete{color:var(--warn)}.fr.tool_calls{color:var(--s1)}.fr.bad{color:var(--err)}
 @media(max-width:560px){.charts{grid-template-columns:1fr}.wf .r,.wf .ax{grid-template-columns:70px 1fr 56px}}
-#login{max-width:320px;margin:15vh auto}#login input{width:100%;margin-bottom:10px}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;padding:5vh 16px;overflow:auto;z-index:10}
 .modal>div{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;width:min(1000px,100%)}
 </style>
@@ -70,13 +69,7 @@ const toast = m => alert(m);
 let page = 'overview', timer;
 const pages = { overview, sessions, requests, upstream, clients, settings };
 
-function showLogin() {
-  clearInterval(timer); document.onkeydown = null;
-  $('#app').innerHTML = `<div id="login" class="card"><h2>OpenCode Go Session Proxy</h2>
-    <input id="pw" type="password" placeholder="Admin password" autofocus><button id="go" style="width:100%">Sign in</button><div id="le" class="err"></div></div>`;
-  const go = async () => { try { await api('login', 'POST', { password: $('#pw').value }); boot(); } catch (e) { $('#le').textContent = e.message; } };
-  $('#pw').focus(); $('#go').onclick = go; $('#pw').onkeydown = e => e.key === 'Enter' && go();
-}
+function showLogin() { clearInterval(timer); document.onkeydown = null; location.href = '/admin/login'; }
 
 const AUTO_KEY = 'ocs_auto';
 let auto = (() => { try { return +(localStorage.getItem(AUTO_KEY) ?? 15); } catch { return 15; } })();
